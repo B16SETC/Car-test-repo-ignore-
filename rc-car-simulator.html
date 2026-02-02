@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RC Car Circuit Simulator</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #111827;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Lucide React icons as SVG components
+        const Battery = () => (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="7" width="16" height="10" rx="2" ry="2"/>
+                <line x1="22" y1="11" x2="22" y2="13"/>
+            </svg>
+        );
+
+        const Cpu = () => (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/>
+                <rect x="9" y="9" width="6" height="6"/>
+                <line x1="9" y1="1" x2="9" y2="4"/>
+                <line x1="15" y1="1" x2="15" y2="4"/>
+                <line x1="9" y1="20" x2="9" y2="23"/>
+                <line x1="15" y1="20" x2="15" y2="23"/>
+                <line x1="20" y1="9" x2="23" y2="9"/>
+                <line x1="20" y1="14" x2="23" y2="14"/>
+                <line x1="1" y1="9" x2="4" y2="9"/>
+                <line x1="1" y1="14" x2="4" y2="14"/>
+            </svg>
+        );
+
+        const Radio = () => (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="2"/>
+                <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/>
+            </svg>
+        );
+
+        const Zap = () => (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+        );
+
+        const Car = () => (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 16H9m10 0h3v-3.15a1 1 0 0 0-.84-.99L16 11l-2.7-3.6a1 1 0 0 0-.8-.4H5.24a2 2 0 0 0-1.8 1.1l-.8 1.63A6 6 0 0 0 2 12.42V16h2"/>
+                <circle cx="6.5" cy="16.5" r="2.5"/>
+                <circle cx="16.5" cy="16.5" r="2.5"/>
+            </svg>
+        );
+
+        function RCCarSimulator() {
+            // Vehicle state
+            const [motorLeftSpeed, setMotorLeftSpeed] = useState(0);
+            const [motorRightSpeed, setMotorRightSpeed] = useState(0);
+            const [servoAngle, setServoAngle] = useState(90);
+            const [headlights, setHeadlights] = useState(false);
+            const [brakelights, setBrakelights] = useState(false);
+            const [turnSignalLeft, setTurnSignalLeft] = useState(false);
+            const [turnSignalRight, setTurnSignalRight] = useState(false);
+            const [currentGear, setCurrentGear] = useState('P'); // P, R, D
+            
+            // Remote state
+            const [joystickX, setJoystickX] = useState(512);
+            const [joystickY, setJoystickY] = useState(512);
+            const [brakePot, setBrakePot] = useState(0);
+            const [buttonHeadlights, setButtonHeadlights] = useState(false);
+            const [buttonLeftTurn, setButtonLeftTurn] = useState(false);
+            const [buttonRightTurn, setButtonRightTurn] = useState(false);
+            const [buttonWarning, setButtonWarning] = useState(false);
+            const [button1, setButton1] = useState(false);
+            const [button2, setButton2] = useState(false);
+            
+            // System state
+            const [batteryVoltage, setBatteryVoltage] = useState(12.6);
+            const [currentDraw, setCurrentDraw] = useState(0);
+            const [isRunning, setIsRunning] = useState(false);
+            const [consoleOutput, setConsoleOutput] = useState([]);
+            const [activeCodeTab, setActiveCodeTab] = useState('vehicle');
+            
+            // Code history for undo/redo
+            const [vehicleCodeHistory, setVehicleCodeHistory] = useState([]);
+            const [controllerCodeHistory, setControllerCodeHistory] = useState([]);
+            const [vehicleRedoHistory, setVehicleRedoHistory] = useState([]);
+            const [controllerRedoHistory, setControllerRedoHistory] = useState([]);
+            
+            // Arduino code
+            const [arduinoCodeVehicle, setArduinoCodeVehicle] = useState(`// RC Car Vehicle Code
+// Pin definitions
+const int MOTOR_AIN1 = 5;
+const int MOTOR_AIN2 = 6;
+const int MOTOR_BIN1 = 9;
+const int MOTOR_BIN2 = 10;
+const int SERVO_PIN = 3;
+const int LED_HEADLIGHT = 7;
+const int LED_BRAKE = 8;
+const int LED_LEFT = 11;
+const int LED_RIGHT = 12;
+
+int throttle = 0;
+int steering = 90;
+int brakeStrength = 0;
+char currentGear = 'P'; // P, R, D
+bool headlightsOn = false;
+bool leftTurnOn = false;
+bool rightTurnOn = false;
+bool warningOn = false;
+
+void setup() {
+  pinMode(MOTOR_AIN1, OUTPUT);
+  pinMode(MOTOR_AIN2, OUTPUT);
+  pinMode(MOTOR_BIN1, OUTPUT);
+  pinMode(MOTOR_BIN2, OUTPUT);
+  pinMode(LED_HEADLIGHT, OUTPUT);
+  pinMode(LED_BRAKE, OUTPUT);
+  pinMode(LED_LEFT, OUTPUT);
+  pinMode(LED_RIGHT, OUTPUT);
+}
+
+void loop() {
+  // Receive data from nRF24L01
+  // throttle, steering, brakeStrength, currentGear, 
+  // headlightsOn, leftTurnOn, rightTurnOn, warningOn
+  
+  int motorSpeed = throttle;
+  bool brakesActive = false;
+  
+  // TRANSMISSION LOGIC - Apply gear restrictions
+  if (currentGear == 'P') {
+    // Park - no movement, servo disabled, brakes active
+    motorSpeed = 0;
+    steering = 90; // Center servo
+    brakesActive = true;
+  } else if (currentGear == 'D') {
+    // Drive - only forward allowed
+    if (motorSpeed < 0) motorSpeed = 0;
+  } else if (currentGear == 'R') {
+    // Reverse - only backward allowed
+    if (motorSpeed > 0) motorSpeed = 0;
+  }
+  
+  // REGENERATIVE BRAKING LOGIC
+  if (brakesActive || (brakeStrength > 0 && abs(motorSpeed) < 20)) {
+    // Apply regenerative braking by shorting motor terminals
+    // Set both motor pins to same PWM for braking
+    int brakeLevel = brakesActive ? 255 : brakeStrength;
+    analogWrite(MOTOR_AIN1, brakeLevel);
+    analogWrite(MOTOR_AIN2, brakeLevel);
+    analogWrite(MOTOR_BIN1, brakeLevel);
+    analogWrite(MOTOR_BIN2, brakeLevel);
+    // Only show brake lights when NOT in Park
+    digitalWrite(LED_BRAKE, !brakesActive);
+  } 
+  // Normal motor control
+  else if (motorSpeed > 0) {
+    // Forward
+    analogWrite(MOTOR_AIN1, motorSpeed);
+    analogWrite(MOTOR_AIN2, 0);
+    analogWrite(MOTOR_BIN1, motorSpeed);
+    analogWrite(MOTOR_BIN2, 0);
+    digitalWrite(LED_BRAKE, LOW);
+  } else if (motorSpeed < 0) {
+    // Reverse (also acts as brake)
+    analogWrite(MOTOR_AIN1, 0);
+    analogWrite(MOTOR_AIN2, abs(motorSpeed));
+    analogWrite(MOTOR_BIN1, 0);
+    analogWrite(MOTOR_BIN2, abs(motorSpeed));
+    digitalWrite(LED_BRAKE, HIGH);
+  } else {
+    // Coast - all pins LOW
+    analogWrite(MOTOR_AIN1, 0);
+    analogWrite(MOTOR_AIN2, 0);
+    analogWrite(MOTOR_BIN1, 0);
+    analogWrite(MOTOR_BIN2, 0);
+    digitalWrite(LED_BRAKE, LOW);
+  }
+  
+  // Servo control (disabled in Park)
+  if (currentGear != 'P') {
+    servo.write(steering);
+  }
+  
+  // Lighting control
+  digitalWrite(LED_HEADLIGHT, headlightsOn);
+  
+  if (warningOn) {
+    // Warning flashers - you'll code the blinking
+    digitalWrite(LED_LEFT, HIGH);
+    digitalWrite(LED_RIGHT, HIGH);
+  } else {
+    digitalWrite(LED_LEFT, leftTurnOn);
+    digitalWrite(LED_RIGHT, rightTurnOn);
+  }
+}`);
+
+            const [arduinoCodeController, setArduinoCodeController] = useState(`// RC Car Controller Code
+// Pin definitions
+const int JOYSTICK_X = A0;
+const int JOYSTICK_Y = A1;
+const int POT_BRAKE = A2;
+const int BTN_HEADLIGHTS = 2;
+const int BTN_LEFT_TURN = 3;
+const int BTN_RIGHT_TURN = 4;
+const int BTN_WARNING = 5;
+const int BTN_GEAR_UP = 6;
+const int BTN_GEAR_DOWN = 7;
+
+struct ControlData {
+  int throttle;
+  int steering;
+  int brakeStrength;
+  char gear;
+  bool headlights;
+  bool leftTurn;
+  bool rightTurn;
+  bool warning;
+};
+
+ControlData data;
+char currentGear = 'P'; // P, R, D
+bool lastGearUpState = HIGH;
+bool lastGearDownState = HIGH;
+
+void setup() {
+  pinMode(BTN_HEADLIGHTS, INPUT_PULLUP);
+  pinMode(BTN_LEFT_TURN, INPUT_PULLUP);
+  pinMode(BTN_RIGHT_TURN, INPUT_PULLUP);
+  pinMode(BTN_WARNING, INPUT_PULLUP);
+  pinMode(BTN_GEAR_UP, INPUT_PULLUP);
+  pinMode(BTN_GEAR_DOWN, INPUT_PULLUP);
+  
+  // Initialize nRF24L01
+  radio.begin();
+}
+
+void loop() {
+  // Read joystick
+  int joyX = analogRead(JOYSTICK_X);
+  int joyY = analogRead(JOYSTICK_Y);
+  
+  // Read brake potentiometer and map to 0-255
+  int brakePot = analogRead(POT_BRAKE);
+  data.brakeStrength = map(brakePot, 0, 1023, 0, 255);
+  
+  // Gear shift logic with debouncing
+  bool gearUpPressed = !digitalRead(BTN_GEAR_UP);
+  bool gearDownPressed = !digitalRead(BTN_GEAR_DOWN);
+  
+  // Shift up: P -> R -> D -> P
+  if (gearUpPressed && !lastGearUpState) {
+    if (currentGear == 'P') currentGear = 'R';
+    else if (currentGear == 'R') currentGear = 'D';
+    else if (currentGear == 'D') currentGear = 'P';
+  }
+  
+  // Shift down: P -> D -> R -> P
+  if (gearDownPressed && !lastGearDownState) {
+    if (currentGear == 'P') currentGear = 'D';
+    else if (currentGear == 'D') currentGear = 'R';
+    else if (currentGear == 'R') currentGear = 'P';
+  }
+  
+  lastGearUpState = gearUpPressed;
+  lastGearDownState = gearDownPressed;
+  
+  // Read buttons (active LOW with pullup)
+  data.headlights = !digitalRead(BTN_HEADLIGHTS);
+  data.leftTurn = !digitalRead(BTN_LEFT_TURN);
+  data.rightTurn = !digitalRead(BTN_RIGHT_TURN);
+  data.warning = !digitalRead(BTN_WARNING);
+  
+  // Map joystick to throttle (-255 to 255)
+  data.throttle = map(joyY, 0, 1023, -255, 255);
+  
+  // Map joystick X to steering (0-180)
+  data.steering = map(joyX, 0, 1023, 0, 180);
+  
+  // Set current gear
+  data.gear = currentGear;
+  
+  // Send data via nRF24L01
+  radio.write(&data, sizeof(data));
+  
+  delay(20);
+}`);
+
+            const addConsoleLog = (message) => {
+                setConsoleOutput(prev => [...prev.slice(-20), `[${new Date().toLocaleTimeString()}] ${message}`]);
+            };
+
+            // Simulate Arduino code execution
+            useEffect(() => {
+                if (!isRunning) return;
+
+                const interval = setInterval(() => {
+                    // Gear shift logic using Mode buttons
+                    // Button 1 cycles forward: P -> R -> D -> P
+                    // Button 2 cycles backward: P -> D -> R -> P
+                    
+                    // Map joystick to throttle (-255 to 255)
+                    const mappedThrottle = Math.round(((joystickY - 512) / 512) * -255);
+                    
+                    // Map joystick X to servo (0-180)
+                    const mappedSteering = Math.round(((joystickX - 512) / 512) * 90 + 90);
+                    
+                    // Clamp values
+                    let throttle = Math.max(-255, Math.min(255, mappedThrottle));
+                    let steering = Math.max(0, Math.min(180, mappedSteering));
+                    
+                    // Map brake pot (0-1023) to brake strength (0-255)
+                    const brakeStrength = Math.round((brakePot / 1023) * 255);
+                    
+                    // TRANSMISSION LOGIC - Apply gear restrictions
+                    if (currentGear === 'P') {
+                        // Park - no movement allowed, servo disabled, brakes active
+                        throttle = 0;
+                        steering = 90; // Center position, servo disabled
+                    } else if (currentGear === 'D') {
+                        // Drive - only forward allowed
+                        if (throttle < 0) throttle = 0;
+                    } else if (currentGear === 'R') {
+                        // Reverse - only backward allowed
+                        if (throttle > 0) throttle = 0;
+                    }
+                    
+                    // Update servo (disabled in Park)
+                    setServoAngle(steering);
+                    
+                    // REGENERATIVE BRAKING LOGIC
+                    let finalMotorSpeed = throttle;
+                    let brakesActive = false;
+                    
+                    // PARK - Always apply full brakes
+                    if (currentGear === 'P') {
+                        finalMotorSpeed = 0;
+                        brakesActive = true;
+                        setBrakelights(false); // No brake lights in Park
+                    }
+                    // If brake is applied and there's no throttle input
+                    else if (brakeStrength > 0 && Math.abs(throttle) < 20) {
+                        // Apply regenerative braking (opposite polarity, reduced strength)
+                        finalMotorSpeed = 0;
+                        brakesActive = true;
+                        setBrakelights(true);
+                    } else if (throttle < 0) {
+                        // Reverse is also braking
+                        finalMotorSpeed = throttle;
+                        setBrakelights(true);
+                    } else if (throttle === 0 && brakeStrength === 0) {
+                        // Coasting - no brake, no throttle
+                        finalMotorSpeed = 0;
+                        setBrakelights(false);
+                    } else {
+                        // Normal driving
+                        finalMotorSpeed = throttle;
+                        setBrakelights(false);
+                    }
+                    
+                    // Update motors based on final speed
+                    setMotorLeftSpeed(finalMotorSpeed);
+                    setMotorRightSpeed(finalMotorSpeed);
+                    
+                    // Headlights controlled by button
+                    setHeadlights(buttonHeadlights);
+                    
+                    // Turn signals - warning overrides individual turns
+                    if (buttonWarning) {
+                        setTurnSignalLeft(true);
+                        setTurnSignalRight(true);
+                    } else {
+                        setTurnSignalLeft(buttonLeftTurn);
+                        setTurnSignalRight(buttonRightTurn);
+                    }
+                    
+                    // Calculate current draw
+                    const motorCurrent = (Math.abs(motorLeftSpeed) + Math.abs(motorRightSpeed)) / 255 * 2;
+                    // Braking current - motors act as generators but driver dissipates ~100mA when braking
+                    const brakingCurrent = brakesActive ? 0.1 : 0;
+                    const servoCurrent = currentGear === 'P' ? 0 : 0.5; // Servo off in Park
+                    const ledCurrent = (headlights ? 0.02 : 0) + (brakelights ? 0.02 : 0) + 
+                                      (turnSignalLeft ? 0.02 : 0) + (turnSignalRight ? 0.02 : 0);
+                    const systemCurrent = 0.15; // Arduino + nRF24L01
+                    const totalCurrent = motorCurrent + brakingCurrent + servoCurrent + ledCurrent + systemCurrent;
+                    setCurrentDraw(totalCurrent);
+                    
+                    // Battery discharge simulation
+                    setBatteryVoltage(prev => Math.max(9.0, prev - (totalCurrent * 0.00001)));
+                    
+                }, 50);
+
+                return () => clearInterval(interval);
+            }, [isRunning, joystickX, joystickY, brakePot, buttonHeadlights, buttonLeftTurn, buttonRightTurn, buttonWarning, motorLeftSpeed, motorRightSpeed, headlights, brakelights, turnSignalLeft, turnSignalRight, currentGear]);
+
+            const handleStart = () => {
+                setIsRunning(true);
+                addConsoleLog("Simulation started");
+                addConsoleLog("nRF24L01 initialized");
+                addConsoleLog("TB6612FNG motor driver ready");
+            };
+
+            const handleStop = () => {
+                setIsRunning(false);
+                setMotorLeftSpeed(0);
+                setMotorRightSpeed(0);
+                setServoAngle(90);
+                setBatteryVoltage(12.6);
+                addConsoleLog("Simulation stopped");
+            };
+
+            const handleReset = () => {
+                handleStop();
+                setJoystickX(512);
+                setJoystickY(512);
+                setBrakePot(0);
+                setButtonHeadlights(false);
+                setButtonLeftTurn(false);
+                setButtonRightTurn(false);
+                setButtonWarning(false);
+                setButton1(false);
+                setButton2(false);
+                setCurrentGear('P');
+                setConsoleOutput([]);
+            };
+            
+            const handleGearShiftUp = () => {
+                // P -> R -> D -> P
+                const gearSequence = ['P', 'R', 'D'];
+                const currentIndex = gearSequence.indexOf(currentGear);
+                const nextIndex = (currentIndex + 1) % gearSequence.length;
+                setCurrentGear(gearSequence[nextIndex]);
+                addConsoleLog(`Gear shifted to: ${gearSequence[nextIndex]}`);
+            };
+            
+            const handleGearShiftDown = () => {
+                // P -> D -> R -> P
+                const gearSequence = ['P', 'D', 'R'];
+                const currentIndex = gearSequence.indexOf(currentGear);
+                const nextIndex = (currentIndex + 1) % gearSequence.length;
+                setCurrentGear(gearSequence[nextIndex]);
+                addConsoleLog(`Gear shifted to: ${gearSequence[nextIndex]}`);
+            };
+
+            const handleVehicleCodeChange = (newCode) => {
+                // Save current code to history before changing
+                setVehicleCodeHistory(prev => [...prev, arduinoCodeVehicle]);
+                // Clear redo history when new changes are made
+                setVehicleRedoHistory([]);
+                setArduinoCodeVehicle(newCode);
+            };
+
+            const handleControllerCodeChange = (newCode) => {
+                // Save current code to history before changing
+                setControllerCodeHistory(prev => [...prev, arduinoCodeController]);
+                // Clear redo history when new changes are made
+                setControllerRedoHistory([]);
+                setArduinoCodeController(newCode);
+            };
+
+            const handleUndoVehicle = () => {
+                if (vehicleCodeHistory.length > 0) {
+                    const newHistory = [...vehicleCodeHistory];
+                    const previousCode = newHistory.pop();
+                    setVehicleCodeHistory(newHistory);
+                    // Save current code to redo history
+                    setVehicleRedoHistory(prev => [...prev, arduinoCodeVehicle]);
+                    setArduinoCodeVehicle(previousCode);
+                }
+            };
+
+            const handleUndoController = () => {
+                if (controllerCodeHistory.length > 0) {
+                    const newHistory = [...controllerCodeHistory];
+                    const previousCode = newHistory.pop();
+                    setControllerCodeHistory(newHistory);
+                    // Save current code to redo history
+                    setControllerRedoHistory(prev => [...prev, arduinoCodeController]);
+                    setArduinoCodeController(previousCode);
+                }
+            };
+
+            const handleRedoVehicle = () => {
+                if (vehicleRedoHistory.length > 0) {
+                    const newRedoHistory = [...vehicleRedoHistory];
+                    const nextCode = newRedoHistory.pop();
+                    setVehicleRedoHistory(newRedoHistory);
+                    // Save current code to undo history
+                    setVehicleCodeHistory(prev => [...prev, arduinoCodeVehicle]);
+                    setArduinoCodeVehicle(nextCode);
+                }
+            };
+
+            const handleRedoController = () => {
+                if (controllerRedoHistory.length > 0) {
+                    const newRedoHistory = [...controllerRedoHistory];
+                    const nextCode = newRedoHistory.pop();
+                    setControllerRedoHistory(newRedoHistory);
+                    // Save current code to undo history
+                    setControllerCodeHistory(prev => [...prev, arduinoCodeController]);
+                    setArduinoCodeController(nextCode);
+                }
+            };
+
+            return (
+                <div className="w-full max-w-7xl mx-auto p-4 bg-gray-900 text-white min-h-screen">
+                    <div className="mb-6">
+                        <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
+                            <Car />
+                            RC Car Circuit Simulator
+                        </h1>
+                        <p className="text-gray-400">Test your Arduino code and circuit before building</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                        {/* Remote Control */}
+                        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                <Radio />
+                                Remote Control (Transmitter)
+                            </h2>
+                            
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">Joystick Control</label>
+                                    <div className="bg-gray-700 rounded p-4 relative h-48 border border-gray-600">
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <div className="w-full h-full relative">
+                                                <div className="absolute top-1/2 left-0 w-full h-px bg-gray-500"></div>
+                                                <div className="absolute left-1/2 top-0 w-px h-full bg-gray-500"></div>
+                                                
+                                                <div 
+                                                    className="absolute w-8 h-8 bg-blue-500 rounded-full -ml-4 -mt-4 cursor-pointer border-2 border-blue-300 transition-all"
+                                                    style={{
+                                                        left: `${(joystickX / 1024) * 100}%`,
+                                                        top: `${(joystickY / 1024) * 100}%`
+                                                    }}
+                                                    onMouseDown={(e) => {
+                                                        const rect = e.currentTarget.parentElement.getBoundingClientRect();
+                                                        const handleMove = (e) => {
+                                                            const x = Math.max(0, Math.min(1024, ((e.clientX - rect.left) / rect.width) * 1024));
+                                                            const y = Math.max(0, Math.min(1024, ((e.clientY - rect.top) / rect.height) * 1024));
+                                                            setJoystickX(Math.round(x));
+                                                            setJoystickY(Math.round(y));
+                                                        };
+                                                        const handleUp = () => {
+                                                            document.removeEventListener('mousemove', handleMove);
+                                                            document.removeEventListener('mouseup', handleUp);
+                                                        };
+                                                        document.addEventListener('mousemove', handleMove);
+                                                        document.addEventListener('mouseup', handleUp);
+                                                    }}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="mt-2 text-sm text-gray-400">
+                                        X: {joystickX} | Y: {joystickY}
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">Brake Potentiometer</label>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="1023"
+                                        value={brakePot}
+                                        onChange={(e) => setBrakePot(parseInt(e.target.value))}
+                                        className="w-full"
+                                    />
+                                    <div className="mt-1 text-sm text-gray-400">Value: {brakePot}</div>
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">Lighting Controls</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            className={`p-2 rounded font-medium text-sm ${buttonHeadlights ? 'bg-yellow-600' : 'bg-gray-700'}`}
+                                            onClick={() => setButtonHeadlights(!buttonHeadlights)}
+                                        >
+                                            💡 Headlights
+                                        </button>
+                                        <button
+                                            className={`p-2 rounded font-medium text-sm ${buttonLeftTurn ? 'bg-orange-600' : 'bg-gray-700'}`}
+                                            onClick={() => setButtonLeftTurn(!buttonLeftTurn)}
+                                        >
+                                            ← Left Turn
+                                        </button>
+                                        <button
+                                            className={`p-2 rounded font-medium text-sm ${buttonRightTurn ? 'bg-orange-600' : 'bg-gray-700'}`}
+                                            onClick={() => setButtonRightTurn(!buttonRightTurn)}
+                                        >
+                                            Right Turn →
+                                        </button>
+                                        <button
+                                            className={`p-2 rounded font-medium text-sm ${buttonWarning ? 'bg-red-600' : 'bg-gray-700'}`}
+                                            onClick={() => setButtonWarning(!buttonWarning)}
+                                        >
+                                            ⚠️ Warning
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">Gear Shift</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button
+                                            className="p-3 rounded font-medium bg-blue-600 hover:bg-blue-700"
+                                            onClick={handleGearShiftUp}
+                                        >
+                                            ⬆️ Shift Up
+                                        </button>
+                                        <button
+                                            className="p-3 rounded font-medium bg-blue-600 hover:bg-blue-700"
+                                            onClick={handleGearShiftDown}
+                                        >
+                                            ⬇️ Shift Down
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Vehicle Status */}
+                        <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                <Car />
+                                Vehicle Status
+                            </h2>
+                            
+                            <div className="space-y-4">
+                                {/* Battery */}
+                                <div className="bg-gray-700 rounded p-3">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="flex items-center gap-2">
+                                            <Battery />
+                                            3S Li-ion Battery
+                                        </span>
+                                        <span className="font-mono">{batteryVoltage.toFixed(2)}V</span>
+                                    </div>
+                                    <div className="w-full bg-gray-600 rounded-full h-3">
+                                        <div 
+                                            className={`h-3 rounded-full transition-all ${
+                                                batteryVoltage > 11 ? 'bg-green-500' : 
+                                                batteryVoltage > 10 ? 'bg-yellow-500' : 'bg-red-500'
+                                            }`}
+                                            style={{width: `${((batteryVoltage - 9) / 3.6) * 100}%`}}
+                                        ></div>
+                                    </div>
+                                </div>
+
+                                {/* Current Draw */}
+                                <div className="bg-gray-700 rounded p-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="flex items-center gap-2">
+                                            <Zap />
+                                            Current Draw
+                                        </span>
+                                        <span className="font-mono">{currentDraw.toFixed(2)}A</span>
+                                    </div>
+                                </div>
+
+                                {/* Gear Indicator */}
+                                <div className="bg-gray-700 rounded p-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="font-medium">Transmission</span>
+                                        <div className="flex gap-2">
+                                            {['P', 'R', 'D'].map(gear => (
+                                                <div
+                                                    key={gear}
+                                                    className={`w-12 h-12 flex items-center justify-center rounded font-bold text-xl ${
+                                                        currentGear === gear 
+                                                            ? gear === 'P' ? 'bg-red-600 text-white' :
+                                                              gear === 'R' ? 'bg-yellow-600 text-white' :
+                                                              'bg-green-600 text-white'
+                                                            : 'bg-gray-800 text-gray-500'
+                                                    }`}
+                                                >
+                                                    {gear}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {currentGear === 'P' && (
+                                        <div className="mt-2 text-sm text-gray-400">Servo disabled in Park</div>
+                                    )}
+                                </div>
+
+                                {/* Motors */}
+                                <div className="bg-gray-700 rounded p-3">
+                                    <div className="mb-3 font-medium">DC Motors (12V)</div>
+                                    <div className="space-y-2">
+                                        <div>
+                                            <div className="flex justify-between text-sm mb-1">
+                                                <span>Left Motor</span>
+                                                <span>{motorLeftSpeed > 0 ? 'FWD' : motorLeftSpeed < 0 ? 'REV' : 'STOP'} {Math.abs(motorLeftSpeed)}/255</span>
+                                            </div>
+                                            <div className="w-full bg-gray-600 rounded-full h-2">
+                                                <div 
+                                                    className={`h-2 rounded-full ${motorLeftSpeed > 0 ? 'bg-blue-500' : 'bg-red-500'}`}
+                                                    style={{width: `${(Math.abs(motorLeftSpeed) / 255) * 100}%`}}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="flex justify-between text-sm mb-1">
+                                                <span>Right Motor</span>
+                                                <span>{motorRightSpeed > 0 ? 'FWD' : motorRightSpeed < 0 ? 'REV' : 'STOP'} {Math.abs(motorRightSpeed)}/255</span>
+                                            </div>
+                                            <div className="w-full bg-gray-600 rounded-full h-2">
+                                                <div 
+                                                    className={`h-2 rounded-full ${motorRightSpeed > 0 ? 'bg-blue-500' : 'bg-red-500'}`}
+                                                    style={{width: `${(Math.abs(motorRightSpeed) / 255) * 100}%`}}
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Servo */}
+                                <div className="bg-gray-700 rounded p-3">
+                                    <div className="flex justify-between mb-2">
+                                        <span>Servo (SG90)</span>
+                                        <span className="font-mono">{servoAngle}°</span>
+                                    </div>
+                                    <div className="w-full bg-gray-600 rounded-full h-2">
+                                        <div 
+                                            className="h-2 rounded-full bg-purple-500"
+                                            style={{width: `${(servoAngle / 180) * 100}%`}}
+                                        ></div>
+                                    </div>
+                                </div>
+
+                                {/* LEDs */}
+                                <div className="bg-gray-700 rounded p-3">
+                                    <div className="mb-2 font-medium">LEDs</div>
+                                    <div className="flex gap-4">
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-4 h-4 rounded-full ${headlights ? 'bg-white shadow-lg shadow-white' : 'bg-gray-600'}`}></div>
+                                            <span className="text-sm">Headlights</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-4 h-4 rounded-full ${brakelights ? 'bg-red-500 shadow-lg shadow-red-500' : 'bg-gray-600'}`}></div>
+                                            <span className="text-sm">Brake</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-4 h-4 rounded-full ${turnSignalLeft ? 'bg-orange-500 shadow-lg shadow-orange-500' : 'bg-gray-600'}`}></div>
+                                            <span className="text-sm">Left</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-4 h-4 rounded-full ${turnSignalRight ? 'bg-orange-500 shadow-lg shadow-orange-500' : 'bg-gray-600'}`}></div>
+                                            <span className="text-sm">Right</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Arduino Code Editor */}
+                    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 mb-4">
+                        <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                            <Cpu />
+                            Arduino Code
+                        </h2>
+                        
+                        <div className="mb-3 flex gap-2 items-center">
+                            <button
+                                onClick={() => setActiveCodeTab('vehicle')}
+                                className={`px-4 py-2 rounded ${activeCodeTab === 'vehicle' ? 'bg-blue-600' : 'bg-gray-700'}`}
+                            >
+                                Vehicle Code
+                            </button>
+                            <button
+                                onClick={() => setActiveCodeTab('controller')}
+                                className={`px-4 py-2 rounded ${activeCodeTab === 'controller' ? 'bg-blue-600' : 'bg-gray-700'}`}
+                            >
+                                Controller Code
+                            </button>
+                            
+                            <div className="flex-1"></div>
+                            
+                            {activeCodeTab === 'vehicle' ? (
+                                <>
+                                    <button
+                                        onClick={handleUndoVehicle}
+                                        disabled={vehicleCodeHistory.length === 0}
+                                        className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed disabled:text-gray-500 rounded font-medium transition-colors"
+                                        title="Undo last change"
+                                    >
+                                        ↶ Undo
+                                    </button>
+                                    <button
+                                        onClick={handleRedoVehicle}
+                                        disabled={vehicleRedoHistory.length === 0}
+                                        className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed disabled:text-gray-500 rounded font-medium transition-colors"
+                                        title="Redo last undone change"
+                                    >
+                                        ↷ Redo
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <button
+                                        onClick={handleUndoController}
+                                        disabled={controllerCodeHistory.length === 0}
+                                        className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed disabled:text-gray-500 rounded font-medium transition-colors"
+                                        title="Undo last change"
+                                    >
+                                        ↶ Undo
+                                    </button>
+                                    <button
+                                        onClick={handleRedoController}
+                                        disabled={controllerRedoHistory.length === 0}
+                                        className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed disabled:text-gray-500 rounded font-medium transition-colors"
+                                        title="Redo last undone change"
+                                    >
+                                        ↷ Redo
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                        
+                        {activeCodeTab === 'vehicle' ? (
+                            <textarea
+                                className="w-full h-80 bg-gray-900 text-green-400 font-mono text-sm p-3 rounded border border-gray-700 focus:outline-none focus:border-blue-500"
+                                value={arduinoCodeVehicle}
+                                onChange={(e) => handleVehicleCodeChange(e.target.value)}
+                                spellCheck={false}
+                            />
+                        ) : (
+                            <textarea
+                                className="w-full h-80 bg-gray-900 text-green-400 font-mono text-sm p-3 rounded border border-gray-700 focus:outline-none focus:border-blue-500"
+                                value={arduinoCodeController}
+                                onChange={(e) => handleControllerCodeChange(e.target.value)}
+                                spellCheck={false}
+                            />
+                        )}
+                    </div>
+
+                    {/* Console Output */}
+                    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 mb-4">
+                        <h2 className="text-xl font-bold mb-4">Serial Monitor</h2>
+                        <div className="bg-black rounded p-3 h-32 overflow-y-auto font-mono text-sm text-green-400">
+                            {consoleOutput.length === 0 ? (
+                                <div className="text-gray-500">No output yet...</div>
+                            ) : (
+                                consoleOutput.map((log, i) => <div key={i}>{log}</div>)
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Control Buttons */}
+                    <div className="flex gap-4">
+                        <button
+                            onClick={handleStart}
+                            disabled={isRunning}
+                            className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded font-medium transition-colors"
+                        >
+                            Start Simulation
+                        </button>
+                        <button
+                            onClick={handleStop}
+                            disabled={!isRunning}
+                            className="px-6 py-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded font-medium transition-colors"
+                        >
+                            Stop
+                        </button>
+                        <button
+                            onClick={handleReset}
+                            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded font-medium transition-colors"
+                        >
+                            Reset
+                        </button>
+                    </div>
+
+                    <div className="mt-6 p-4 bg-blue-900 bg-opacity-30 border border-blue-700 rounded">
+                        <h3 className="font-bold mb-2">How to use:</h3>
+                        <ul className="text-sm space-y-1 text-gray-300">
+                            <li>• Modify the Arduino code above to test your logic</li>
+                            <li>• Click "Start Simulation" to run the code</li>
+                            <li>• Use the joystick and controls on the remote to control the car</li>
+                            <li>• Watch the vehicle status update in real-time</li>
+                            <li>• Monitor battery voltage and current draw</li>
+                            <li>• Test before building the physical circuit!</li>
+                        </ul>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<RCCarSimulator />);
+    </script>
+</body>
+</html>c
